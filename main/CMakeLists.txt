@@ -6,6 +6,7 @@ idf_component_register(
   "BAS/inc/arch/NET/LwIP"
   "BAS/inc/arch/FreeRTOS"
   "BAS/examples/xedge/src"
+  ".."
   PRIV_REQUIRES
     driver    
     esp_wifi
@@ -19,6 +20,7 @@ idf_component_register(
     app_update      # <-- for esp_ota_ops.h
     esp32-camera 
 	esp_timer
+    impulse         # <-- for impulse.h
 )
 
 # -fno-inline-small-functions is required. The Xtensa ESP32 compiler
@@ -48,3 +50,5 @@ set_source_files_properties(
   PROPERTIES
     COMPILE_FLAGS "-Wno-maybe-uninitialized -Wno-error=maybe-uninitialized"
 )
+
+target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu++17 -Wno-maybe-uninitialized)

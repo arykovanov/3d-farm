@@ -1,4 +1,4 @@
-/* 
+/*
 Copyright (c) Real Time Logic
 This software may only be used by the terms and conditions stipulated
 in the corresponding license agreement under which the software has
@@ -56,7 +56,7 @@ LThreadMgr Documentation:
     https://realtimelogic.com/ba/doc/en/C/reference/html/structThreadJob.html
   Introductory example:
     https://github.com/RealTimeLogic/BAS/blob/main/examples/xedge/src/AsynchLua.c
-*/ 
+*/
 
 #include <esp_adc/adc_oneshot.h>
 #include <esp_adc/adc_continuous.h>
@@ -79,6 +79,8 @@ LThreadMgr Documentation:
 
 #include "BaESP32.h"
 #include "CfgESP32.h"
+
+#include "impulse.h"
 
 #define ECHK ESP_ERROR_CHECK
 
@@ -678,7 +680,7 @@ static int ladc(lua_State* L)
          err=adc_continuous_register_event_callbacks(
             contHandle,&cbs,(void*)pin);
       }
-      if(ESP_OK != err) 
+      if(ESP_OK != err)
       {
          adc_continuous_deinit(contHandle);
          return pushEspRetVal(L, err, "continuous_config",TRUE);
@@ -960,7 +962,7 @@ static int lgpio(lua_State* L)
    {
       /* Userdata at -1 and callback ix is 4 */
       gpio->callbackRef=lReferenceCallback(L, lua_absindex(L,-1), 4);
-      gpio_isr_handler_add(pin, gpioInterruptHandler, (void *)pin); 
+      gpio_isr_handler_add(pin, gpioInterruptHandler, (void *)pin);
    }
    return 1;
 }
@@ -979,7 +981,7 @@ typedef struct
 {
    pcnt_unit_handle_t unit;
    int callbackRef;
-   gpio_num_t pin; // One of the GPIO pins used; We use it as index in activeGPIO 
+   gpio_num_t pin; // One of the GPIO pins used; We use it as index in activeGPIO
    int noOfChannels;
    int qHead;
    int qTail;
@@ -1160,7 +1162,7 @@ LPCNT_channels(lua_State* L,pcnt_unit_handle_t unit,
             throwPinInUse(L,chanCfg.edge_gpio_num);
          if(activeGPIO[chanCfg.level_gpio_num])
             throwPinInUse(L,chanCfg.level_gpio_num);
-         /* Select any GPIO we use. Used for activeGPIO[] lookup */ 
+         /* Select any GPIO we use. Used for activeGPIO[] lookup */
          *pinPtr=chanCfg.edge_gpio_num;
       }
       int edgeIx=balua_getTabField(L, actionIx, "edge");
@@ -1584,7 +1586,7 @@ typedef struct
  * Structure used to manage data intended for I2C write operations.
  * - len  : Length of the data to be written (in bytes).
  * - byte : Stores a single byte of data if the input is a single integer.
- * - data : Pointer to the data buffer, either pointing to `byte` (for single-byte writes) 
+ * - data : Pointer to the data buffer, either pointing to `byte` (for single-byte writes)
  *          or a Lua string (for multi-byte writes).
  */
 typedef struct
@@ -1616,50 +1618,50 @@ static LI2CMaster* I2CMaster_checkUD(lua_State* L, int checkCmd)
 
 /* I2CMaster_addDevice(i2cm, address)
  * Configures or reconfigures an I2C device on the bus with the specified address.
- * 
+ *
  * Parameters:
  *   i2cm   : Pointer to the LI2CMaster structure, containing the bus and device configuration.
  *   address: I2C address of the device to add.
- * 
+ *
  * Logic:
  *   - Checks if the device with the specified address is already configured on the bus.
- *   - If `dev_handle` exists but the address differs, it removes the previous device handle 
+ *   - If `dev_handle` exists but the address differs, it removes the previous device handle
  *     using `i2c_master_bus_rm_device`.
- *   - If the address is new, it updates the `device_address` in `dev_cfg` and adds the new device 
+ *   - If the address is new, it updates the `device_address` in `dev_cfg` and adds the new device
  *     to the bus with `i2c_master_bus_add_device`, setting `dev_handle`.
- * 
+ *
  * Returns:
  *   ESP_OK on success, or an error code if unable to add or reconfigure the device.
  */
 static int I2CMaster_addDevice(LI2CMaster* i2cm, uint16_t address)
 {
    esp_err_t ret_val = ESP_OK;
-   
+
    // If a device with a different address is already configured, remove it
    if(i2cm->dev_handle && (i2cm->dev_cfg.device_address != address))
    {
-      ret_val = i2c_master_bus_rm_device(i2cm->dev_handle);  
+      ret_val = i2c_master_bus_rm_device(i2cm->dev_handle);
    }
 
    // Set new device address if necessary, then add it to the bus
    if((ret_val == ESP_OK) && (i2cm->dev_cfg.device_address != address))
    {
-      i2cm->dev_cfg.device_address = address;     
+      i2cm->dev_cfg.device_address = address;
       ret_val = i2c_master_bus_add_device(i2cm->bus_handle, &i2cm->dev_cfg, &i2cm->dev_handle);
    }
-  
+
    return ret_val;
 }
 
 /* I2CMaster_getWriteData(L, index, wbuf)
  * Populates the write_buffer_t structure with data for I2C write operations.
  * Determines if the Lua input at the given index is a single integer or a string.
- * 
+ *
  * Parameters:
  *   L     : The Lua state.
  *   index : The index in the Lua stack to retrieve the data.
  *   wbuf  : Pointer to the write_buffer_t structure to store the result.
- * 
+ *
  * Logic:
  *   - If the Lua input is an integer, it is treated as a single byte, stored in `byte`, and `data` points to `byte`.
  *   - If the Lua input is a string, it is treated as a multi-byte buffer, and `data` points to the string data.
@@ -1680,37 +1682,37 @@ static void I2CMaster_getWriteData(lua_State* L, int index, write_buffer_t* wbuf
 
 /* i2cm:probe(address, [timeout])
  * Lua API: Checks for the presence of a device at the specified I2C address.
- * 
+ *
  * This function sends a START condition followed by the device address in read mode (R).
  * If the device acknowledges (ACK) and the probe is successful, the function returns ESP_OK.
  * A STOP condition is issued after the probe attempt.
- * 
+ *
  * Important:
  *   - Ensure pull-up resistors are connected to the SDA and SCL lines when using this function.
- *   - If the function returns ESP_ERR_TIMEOUT and the timeout was correctly specified, 
+ *   - If the function returns ESP_ERR_TIMEOUT and the timeout was correctly specified,
  *     it is likely due to missing or insufficient pull-up resistors.
- * 
+ *
  * Parameters:
  *   address (int)         : The I2C address of the device to probe.
  *   timeout (optional int): Timeout for the probe operation in ms (default 500ms).
- * 
+ *
  * Returns:
  *   Boolean true if the device is detected (ESP_OK), or false with an error code otherwise.
  */
 static int I2CMaster_probe(lua_State* L)
 {
    LI2CMaster* i2cm = I2CMaster_checkUD(L, TRUE);
-   
+
    // Retrieve optional timeout from Lua, defaulting to I2CWT if not provided
    TickType_t timeout = I2CWT(L, 3);
-   
+
    // Get the address from Lua
    uint16_t address = (uint16_t) luaL_checkinteger(L, 2);
-   
+
    ThreadMutex_release(soDispMutex);
-   esp_err_t ret_val = i2c_master_probe(i2cm->bus_handle, address, timeout); 
+   esp_err_t ret_val = i2c_master_probe(i2cm->bus_handle, address, timeout);
    ThreadMutex_set(soDispMutex);
-   
+
    return pushEspRetVal(L, ret_val, 0, FALSE);
 }
 
@@ -1736,7 +1738,7 @@ static int I2CMaster_write(lua_State* L)
    {
       write_buffer_t wbuf;
       I2CMaster_getWriteData(L, 3, &wbuf);
-      
+
       // Ensure data is available to write
       if(wbuf.len == 0)
       {
@@ -1745,10 +1747,10 @@ static int I2CMaster_write(lua_State* L)
 
       // Transmit data
       ThreadMutex_release(soDispMutex);
-      ret_val = i2c_master_transmit(i2cm->dev_handle, wbuf.data, wbuf.len, timeout); 
+      ret_val = i2c_master_transmit(i2cm->dev_handle, wbuf.data, wbuf.len, timeout);
       ThreadMutex_set(soDispMutex);
    }
-   
+
    return pushEspRetVal(L, ret_val, 0, FALSE);
 }
 
@@ -1792,7 +1794,7 @@ static int I2CMaster_read(lua_State* L)
             baFree(recbuf);
             return 1;
          }
-         
+
          baFree(recbuf);
       }
       else
@@ -1800,23 +1802,23 @@ static int I2CMaster_read(lua_State* L)
          ret_val = ESP_ERR_NO_MEM;
       }
    }
-  
+
    return pushEspRetVal(L, ret_val, 0, FALSE);
 }
 
  /* i2cm:readfrom(address, register, len, [timeout])
  * Lua API: Reads data from a specific register on the I2C device.
- * 
- * This function sends a write command to specify the register, followed immediately by a read command 
+ *
+ * This function sends a write command to specify the register, followed immediately by a read command
  * to retrieve data from the device, without issuing a STOP condition between the write and read operations.
  * This is suited for devices that require a repeated START condition when reading registers.
- * 
+ *
  * Parameters:
  *   address (int)   : The I2C address of the device.
  *   register (int)  : The register address to read from.
  *   len (int)       : Number of bytes to read from the register.
  *   timeout (optional int): Timeout for the operation in ms (default 500ms).
- * 
+ *
  * Returns:
  *   Lua string with the data read, or nil and error code if unsuccessful.
  */
@@ -1853,7 +1855,7 @@ static int I2CMaster_readfrom(lua_State* L)
             baFree(recbuf);
             return 1;
          }
-         
+
          baFree(recbuf);
       }
       else
@@ -1874,16 +1876,16 @@ static int I2CMaster_readfrom(lua_State* L)
 static int I2CMaster_close(lua_State* L)
 {
    LI2CMaster* i2cm = I2CMaster_getUD(L);
-   
-   if(i2cm->dev_handle) 
+
+   if(i2cm->dev_handle)
    {
-      i2c_master_bus_rm_device(i2cm->dev_handle);  
+      i2c_master_bus_rm_device(i2cm->dev_handle);
       i2cm->dev_handle = 0;
    }
-   
+
    if(i2cm->bus_handle)
    {
-      activeGPIO[i2cm->bus_cfg.sda_io_num] = 0; 
+      activeGPIO[i2cm->bus_cfg.sda_io_num] = 0;
       activeGPIO[i2cm->bus_cfg.scl_io_num] = 0;
       i2c_del_master_bus(i2cm->bus_handle);
       i2cm->bus_handle = 0;
@@ -1896,7 +1898,7 @@ static const luaL_Reg i2cMasterLib[] = {
    {"probe", I2CMaster_probe},
    {"readfrom", I2CMaster_readfrom},
    {"write", I2CMaster_write},
-   {"read", I2CMaster_read},   
+   {"read", I2CMaster_read},
    {"close", I2CMaster_close},
    {"__close", I2CMaster_close},
    {"__gc", I2CMaster_close},
@@ -1905,16 +1907,16 @@ static const luaL_Reg i2cMasterLib[] = {
 
 /* li2cMaster(port, pinSDA, pinSCL, speed)
  * Initializes a new I2C master object and configures the I2C bus.
- * 
+ *
  * Parameters:
  *   port (int)      : The I2C port number, e.g., 0 or 1.
  *   pinSDA (int)    : The GPIO number for I2C Serial Data (SDA) line.
  *   pinSCL (int)    : The GPIO number for I2C Serial Clock (SCL) line.
  *   speed (int)     : The clock speed in Hz for the I2C bus.
- * 
+ *
  * Returns:
  *   Lua object      : A new I2C master instance or an error if initialization fails.
- * 
+ *
  * Description:
  *   - Checks that the specified port number is valid.
  *   - Allocates and initializes an `LI2CMaster` object to manage the I2C bus.
@@ -1925,14 +1927,14 @@ static const luaL_Reg i2cMasterLib[] = {
 static int li2cMaster(lua_State* L)
 {
   // Get the I2C port from Lua and validate its range
-  i2c_port_t port = (i2c_port_t)luaL_checkinteger(L, 1); 
-  
+  i2c_port_t port = (i2c_port_t)luaL_checkinteger(L, 1);
+
   if((port < 0) || (port >= I2C_NUM_MAX))
   {
      luaL_error(L, "Port num. range err.");
   }
    // Allocate memory for the new I2C master object and register it in Lua
-  LI2CMaster* i2cm = (LI2CMaster*)lNewUdata(L, sizeof(LI2CMaster), BAI2CMASTER, i2cMasterLib);   
+  LI2CMaster* i2cm = (LI2CMaster*)lNewUdata(L, sizeof(LI2CMaster), BAI2CMASTER, i2cMasterLib);
   // Configure the I2C bus parameters (clock source, port, SDA, SCL, and pullup resistors)
   i2cm->bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
   i2cm->bus_cfg.i2c_port = port;
@@ -1943,7 +1945,7 @@ static int li2cMaster(lua_State* L)
   // Configure the I2C device parameters (7-bit address, initial address 0, and bus speed)
    i2cm->dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
   i2cm->dev_cfg.device_address = 0;
-  i2cm->dev_cfg.scl_speed_hz = luaL_checkinteger(L, 4);// speed 
+  i2cm->dev_cfg.scl_speed_hz = luaL_checkinteger(L, 4);// speed
   // Create a new I2C master bus with the configured settings
   esp_err_t ret_val = i2c_new_master_bus(&i2cm->bus_cfg, &i2cm->bus_handle);
   // Check if bus creation was successful; if not, return an error
@@ -1961,7 +1963,7 @@ static int li2cMaster(lua_State* L)
   {
      throwPinInUse(L, i2cm->bus_cfg.scl_io_num);
   }
-  
+
   activeGPIO[i2cm->bus_cfg.sda_io_num] = (LGPIO*)i2cm;
   activeGPIO[i2cm->bus_cfg.scl_io_num] = (LGPIO*)i2cm;
 
@@ -2349,7 +2351,7 @@ static int LRmtTx_create(lua_State* L)
       .flags.io_od_mode=balua_getBoolField(L,1,"opendrain",FALSE)
 #endif
    };
-      
+
    /* fixme: analyze this; ESP-IDF assert rmt_ll_tx_set_channel_clock_div if larger */
    if(txCfg.resolution_hz > 80000000)
       return pushEspRetVal(L,ESP_ERR_INVALID_ARG,"resolution",TRUE);
@@ -3010,7 +3012,7 @@ wifiScanCB(lua_State* L, const uint8_t* ssid, int rssi,
 {
    ThreadMutex_set(soDispMutex);
    pushApInfo(L,ssid,rssi,authmode,pchiper,gcipher,channel);
-   lua_rawseti(L, -2, (int)lua_rawlen(L, -2) + 1); 
+   lua_rawseti(L, -2, (int)lua_rawlen(L, -2) + 1);
    ThreadMutex_release(soDispMutex);
 }
 
@@ -3030,26 +3032,26 @@ static int lwscan(lua_State* L)
  * @brief Connect to a WiFi or wired network by providing the required configuration parameters.
  *
  * @param network A string representing the network adapter type. Valid options are "wifi", "W5500", and "DP83848".
- * @param cfg     A required configuration table with specific parameters for each adapter. 
+ * @param cfg     A required configuration table with specific parameters for each adapter.
  *                Omit the cfg table argument to disconnect from a network.
  *
  * @return Number of return values pushed to the Lua stack.
  *
- * @note The configuration parameters provided in the cfg table are stored persistently in NVRAM 
- *       if the ESP32 successfully connects to the network. These parameters will be used 
+ * @note The configuration parameters provided in the cfg table are stored persistently in NVRAM
+ *       if the ESP32 successfully connects to the network. These parameters will be used
  *       to automatically connect to the network when the ESP32 restarts.
  */
 static int lnetconnect(lua_State* L)
 {
 netConfig_t cfg = {0};
-   
+
    // Set the network adapter from Lua string argument.
    strcpy(cfg.adapter, (char*)luaL_checkstring(L, 1));
-   
-   // Disconnects the network when the configuration table argument is not provided. 
+
+   // Disconnects the network when the configuration table argument is not provided.
    if(lua_gettop(L) == 1)
    {
-      strcpy(cfg.adapter, "close");   
+      strcpy(cfg.adapter, "close");
    }
    // Load the parameters for wifi.
    else if(!strcmp("wifi", cfg.adapter))
@@ -3077,7 +3079,7 @@ netConfig_t cfg = {0};
       cfg.phyMdioPin = (int)balua_checkIntField(L, 2, "mdio");
       cfg.phyMdcPin = (int)balua_checkIntField(L, 2, "mdc");
    }
-   else 
+   else
    {
       luaL_error(L,"Unknown adapter '%s'", cfg.adapter);
    }
@@ -3088,7 +3090,7 @@ netConfig_t cfg = {0};
    // Call the netConnect function and push the return value to the Lua stack.
    return pushEspRetVal(L, netConnect(&cfg), 0, TRUE);
 }
- 
+
 /**
  * @brief Set the log level for the ESP32 system log.
  *
@@ -3109,7 +3111,7 @@ netConfig_t cfg = {0};
  * @note The maximum log level is configured in the menuconfig settings.
  * If an invalid log level is provided, or if the requested log level exceeds the
  * maximum level set in menuconfig, an error will be raised with a detailed message.
- */ 
+ */
 static int lloglevel(lua_State* L)
 {
    static const char* levelNames[] =  {
@@ -3129,17 +3131,17 @@ static int lloglevel(lua_State* L)
          break;
       }
    }
-   if(level > ESP_LOG_VERBOSE) 
+   if(level > ESP_LOG_VERBOSE)
    {
       luaL_error(L, "Invalid log level '%s', choose from none|error|warn|info|debug|verbose\n", levelName);
    }
-   else if(level > CONFIG_LOG_MAXIMUM_LEVEL) 
+   else if(level > CONFIG_LOG_MAXIMUM_LEVEL)
    {
       luaL_error(L, "Can't set log level to %s; max level limited in menuconfig to %s. "
                  "Please increase CONFIG_LOG_MAXIMUM_LEVEL in menuconfig.\n",
                  levelName, levelNames[CONFIG_LOG_MAXIMUM_LEVEL]);
    }
-   else 
+   else
    {
       esp_log_level_set("*", level);
    }
@@ -3258,7 +3260,7 @@ static int lCRC(lua_State* L)
       }
       return 1;
    }
-   return throwInvArg(L,"type");  
+   return throwInvArg(L,"type");
 }
 
 
@@ -3399,6 +3401,29 @@ static const luaL_Reg basLib[] = {
    {"mac", lmac}
 };
 
+static int lua_impulse_classify(lua_State* L)
+{
+   size_t imagesize = 0;
+   uint8_t* imageData = (uint8_t*)luaL_checklstring(L, 1, &imagesize);
+
+   const char* label = "unknown";
+   int ret = classify(imageData, imagesize, &label);
+   if (ret != 0) {
+      lua_pushnil(L);
+      lua_pushfstring(L,"impulse error: %i", ret);
+      return 2;
+   }
+
+   lua_pushstring(L, label);
+   return 1;
+}
+
+static const luaL_Reg impulseLib[] = {
+  {"classify", lua_impulse_classify},
+  {NULL, NULL}
+};
+
+
 #define RESERVED_PIN (void*)1  // Define a flag for reserved pins
 
 void installESP32Libs(lua_State* L)
@@ -3437,6 +3462,10 @@ void installESP32Libs(lua_State* L)
    soDispMutex = HttpServer_getMutex(ltMgr.server);
    luaL_newlib(L, esp32Lib);
    lua_setglobal(L,"esp32");
+
+   luaL_newlib(L, impulseLib);
+   lua_setglobal(L,"impulse");
+
    lua_getglobal(L, "ba");
    luaL_setfuncs(L,basLib,0);
    lua_pop(L,1);

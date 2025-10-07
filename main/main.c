@@ -1,4 +1,4 @@
-/* 
+/*
    ESP-IDF startup code calling xedge.c after ESP initialization.
 
    Copyright (c) Real Time Logic
@@ -9,6 +9,7 @@
    terms and conditions of the included License Agreement.
 */
 
+#include "esp_log_level.h"
 #include <sys/param.h>
 #include <time.h>
 #include <sys/time.h>
@@ -50,7 +51,7 @@ struct {
    char* buf;
    size_t ix;
    size_t size;
-   SemaphoreHandle_t sem; 
+   SemaphoreHandle_t sem;
 } luaLineBuffer = {0};
 
 static const char TAG[]={"X"};
@@ -91,7 +92,7 @@ static void executeOnLuaReplCB(ThreadJob* job, int msgh, LThreadMgr* mgr)
 {
    lua_State* L = job->Lt;
    int status = luaL_loadbuffer(L,luaLineBuffer.buf,luaLineBuffer.ix,"=stdin");
-   
+
    if(LUA_OK == status)
    {
       lua_pcall(L, 0, 0, msgh);
@@ -99,7 +100,7 @@ static void executeOnLuaReplCB(ThreadJob* job, int msgh, LThreadMgr* mgr)
       linenoiseHistoryAdd(luaLineBuffer.buf);
       luaLineBuffer.ix = 0;
    }
-   else 
+   else
    {
       const char* emsg = lcomplete(L, status);
       if(emsg)
@@ -196,7 +197,7 @@ int xedgeOpenAUX(XedgeOpenAUX* aux)
    else if(netIsAdapterSpi(cfg.adapter) || netIsAdapterRmii(cfg.adapter))
    {
       netEthConnect();
-   }  
+   }
 
    if(gotSdCard)
    {
@@ -312,7 +313,7 @@ static void writeHttpTrace(char* buf, int bufLen)
  */
 int xedgeInitDiskIo(DiskIo* io) /* Called by xedge.c */
 {
-   static const char bp[] = {"/spiflash"}; 
+   static const char bp[] = {"/spiflash"};
    const esp_vfs_fat_mount_config_t mcfg = {
       .max_files = 20,
       .format_if_mount_failed = true,
@@ -322,8 +323,8 @@ int xedgeInitDiskIo(DiskIo* io) /* Called by xedge.c */
    if( ! mounted )
    {
       wl_handle_t hndl = WL_INVALID_HANDLE;
-      HttpTrace_printf(9,"Mounting internal FAT filesystem\n"); 
-      esp_err_t err=esp_vfs_fat_spiflash_mount_rw_wl(bp,"storage",&mcfg,&hndl); 
+      HttpTrace_printf(9,"Mounting internal FAT filesystem\n");
+      esp_err_t err=esp_vfs_fat_spiflash_mount_rw_wl(bp,"storage",&mcfg,&hndl);
       if (err != ESP_OK)
       {
          ESP_LOGE(TAG, "mounting FATFS failed (%s)", esp_err_to_name(err));
@@ -344,12 +345,12 @@ static void mainServerTask(Thread *t)
 #ifdef USE_DLMALLOC
    /* Allocate as much pSRAM as possible */
 #if CONFIG_IDF_TARGET_ESP32S3
-   EXT_RAM_BSS_ATTR static char poolBuf[7*1024*1024 + 5*1024];
+   EXT_RAM_BSS_ATTR static char poolBuf[3*1024*1024 + 5*1024];
 #else
    EXT_RAM_BSS_ATTR static char poolBuf[3*1024*1024 + 5*1024];
 #endif
    init_dlmalloc(poolBuf, poolBuf + sizeof(poolBuf));
-#else   
+#else
    #error must use dlmalloc
 #endif
 
@@ -359,7 +360,7 @@ static void mainServerTask(Thread *t)
    }
 
    HttpTrace_setFLushCallback(writeHttpTrace);
-   HttpServer_setErrHnd(myErrHandler); 
+   HttpServer_setErrHnd(myErrHandler);
    barracuda(); /* Does not return */
 }
 
@@ -386,18 +387,18 @@ static esp_err_t openSdCard(sdmmc_slot_config_t* slotCfg)
       .max_files = 20, /* max open files */
       .allocation_unit_size = 16 * 1024
    };
-   
+
    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
    slotCfg->flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
    ret = esp_vfs_fat_sdmmc_mount(mountPoint, &host, slotCfg, &mountCfg, &card);
-   
+
    gotSdCard = (ret == ESP_OK) ? true : false;
-   
+
    if(ret == ESP_OK)
    {
       ESP_LOGI(TAG, "SD card mounted");
       sdmmc_card_print_info(stdout, card);
-   }   
+   }
    else if(ret == ESP_ERR_TIMEOUT)
    {
       ESP_LOGI(TAG, "SD card not detected");
@@ -410,7 +411,7 @@ static esp_err_t openSdCard(sdmmc_slot_config_t* slotCfg)
    {
       ESP_LOGE(TAG, "Cannot initialize SD card (%s)", esp_err_to_name(ret));
    }
-   
+
    return ret;
 }
 
@@ -426,7 +427,7 @@ static esp_err_t closeSdcard(void)
    if(card)
    {
       err = esp_vfs_fat_sdcard_unmount(mountPoint, card);
-      
+
       if(err == ESP_OK)
       {
          ESP_LOGI(TAG, "SD card unmounted");
@@ -434,7 +435,7 @@ static esp_err_t closeSdcard(void)
          gotSdCard = false;
       }
    }
-   
+
    return err;
 }
 
@@ -452,21 +453,21 @@ static int checkSdcardParams(int params, int width)
    {
       return FALSE;
    }
-   
+
    //  Only allows arbitrary GPIOs with the ESP32-S3.
    if(params > 1)
    {
-#ifdef SOC_SDMMC_USE_GPIO_MATRIX  
+#ifdef SOC_SDMMC_USE_GPIO_MATRIX
       if((width == 8) && (params != 11))
       {
          return FALSE;
       }
-      
+
       if((width == 4) && (params != 7))
       {
          return FALSE;
       }
-      
+
       if((width == 1) && (params != 4))
       {
          return FALSE;
@@ -475,7 +476,7 @@ static int checkSdcardParams(int params, int width)
    return FALSE;
 #endif
    }
-   
+
    return TRUE;
 }
 
@@ -494,12 +495,12 @@ static int checkSdcardParams(int params, int width)
 int lsdcard(lua_State* L)
 {
    int params = lua_gettop(L);
-   
+
    // The width parameter is mandatory.
    if(params >= 1)
    {
       sdmmc_slot_config_t cfg = SDMMC_SLOT_CONFIG_DEFAULT();
-      
+
       cfg.width = luaL_checkinteger(L, 1);
 
       // Check that the number of parameters corresponds to the bit width and capabilities of the CPU.
@@ -511,32 +512,32 @@ int lsdcard(lua_State* L)
             cfg.clk = luaL_checkinteger(L, 2);
             cfg.cmd = luaL_checkinteger(L, 3);
             cfg.d0 = luaL_checkinteger(L, 4);
-         }   
-   
+         }
+
          if(params >= 7)
-         {  
+         {
             cfg.d1 = luaL_checkinteger(L, 5);
             cfg.d2 = luaL_checkinteger(L, 6);
             cfg.d3 = luaL_checkinteger(L, 7);
          }
 
          if(params == 11)
-         {  
+         {
             cfg.d4 = luaL_checkinteger(L, 8);
             cfg.d5 = luaL_checkinteger(L, 9);
             cfg.d6 = luaL_checkinteger(L, 10);
             cfg.d7 = luaL_checkinteger(L, 11);
          }
-#endif     
+#endif
          esp_err_t err = closeSdcard();
          if(ESP_OK == err)
-         {           
+         {
             err = openSdCard(&cfg);
             if(ESP_OK == err)
             {
                cfgSetSdCard(&cfg);
-               // TODO: When I execute esp_restart with esp32-s3 and the console 
-               // is CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG, the restart hangs, but 
+               // TODO: When I execute esp_restart with esp32-s3 and the console
+               // is CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG, the restart hangs, but
                // when I put a delay of 1000 mS it works.
 #if CONFIG_IDF_TARGET_ESP32S3
                Thread_sleep(1000);
@@ -544,7 +545,7 @@ int lsdcard(lua_State* L)
                esp_restart();
             }
          }
-         
+
          return pushEspRetVal(L, err, 0, TRUE);
       }
       else
@@ -552,7 +553,7 @@ int lsdcard(lua_State* L)
           luaL_argerror(L, 1, "Invalid paramenters");
       }
    }
-   
+
    // If the number of arguments is less 0, erase the SD card config.
    closeSdcard();
    lua_pushboolean(L, (cfgEraseSdCard() == ESP_OK));
@@ -562,22 +563,22 @@ int lsdcard(lua_State* L)
 static bool initComponents()
 {
    static Thread t;
-   
+
    cfgInit();
 
    sdmmc_slot_config_t cfg = SDMMC_SLOT_CONFIG_DEFAULT();
-   
+
    if(cfgGetSdCard(&cfg) == ESP_OK)
    {
       openSdCard(&cfg);
    }
-   
+
    bool adapter = netInit();
 
    /* Using BAS thread porting API */
    Thread_constructor(&t, mainServerTask, ThreadPrioNormal, BA_STACKSZ);
    Thread_start(&t);
-   
+
    return adapter;
 }
 
@@ -589,7 +590,7 @@ static void startMdnsService()
    const char* ptr = ESP_OK == mDnsCfg(buf) ? buf : "Xedge32";
    ESP_ERROR_CHECK(mdns_init());
    mdns_hostname_set(ptr);
-   HttpTrace_printf(9,"mDNS: %s\n",ptr); 
+   HttpTrace_printf(9,"mDNS: %s\n",ptr);
    mdns_instance_name_set("Xedge32");
    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 }
@@ -601,11 +602,11 @@ static void startMdnsService()
 void app_main(void)
 {
    // Disable the esp log system.
-   esp_log_level_set("*", ESP_LOG_ERROR);
-   
+   esp_log_level_set("*", ESP_LOG_VERBOSE);
+
    bool adapter = initComponents();
    manageConsole(true);
-   
+
    for(int i = 0; i < 50 ; i++)
    {
       if(netGotIP()) break;
@@ -624,13 +625,13 @@ void app_main(void)
    {
       netWifiApStart(true);
    }
-   
+
    /*
-    * The luaLineBuffer is shared with the thread that executes executeOnLuaReplCB callback. 
+    * The luaLineBuffer is shared with the thread that executes executeOnLuaReplCB callback.
     * To ensure data integrity and prevent simultaneous access, a binary semaphore is used.
     */
    luaLineBuffer.sem = xSemaphoreCreateBinary();
-   
+
    HttpTrace_printf(5,
                     "\n\n __   __        _            \n \\ \\ / /       | |"
                     "           \n  \\ V / ___  __| | __ _  ___ \n   > < / _"
@@ -638,26 +639,26 @@ void app_main(void)
                     " /_/ \\_\\___|\\__,_|\\__, |\\___|\n                   "
                     "__/ |     \n                  |___/      \n\n");
    HttpTrace_printf(5,"LuaShell32 ready.\n");
-    
+
    /*
     * The app_main thread originally runs at low priority (ESP_TASK_MAIN_PRIO, or ESP_TASK_PRIO_MIN + 1).
     * The linenoise library uses the read() function that can block while waiting for USB/UART characters.
     * Occasionally, the console hangs, especially when closing the network adapter. The root cause seems to be
     * priority inversion, which can impact the RX ring buffer.
-    * 
+    *
     * We've identified two potential fixes:
-    * 
+    *
     * 1. Lower the FreeRTOS tick frequency to 100 Hz. This approach minimizes context switches and interrupts,
     *    but it might affect the overall responsiveness of the firmware.
-    * 
+    *
     * 2. Increase the priority of the app_main thread. We chose this solution to avoid altering the tick frequency
     *    and maintain firmware responsiveness.
-    * 
+    *
     * The chosen solution may increase the app_main thread's priority to mitigate priority inversion. This helps
     * prevent delays in the RX ring buffer processing caused by other tasks. Note that careful consideration
     * of task priorities is necessary to avoid other unexpected behavior or conflicts.
     */
-   vTaskPrioritySet(NULL, uxTaskPriorityGet(NULL) + 4);  
+   vTaskPrioritySet(NULL, uxTaskPriorityGet(NULL) + 4);
    for(;;)
    {
       char* line = linenoise("\033[0m> ");
@@ -665,7 +666,7 @@ void app_main(void)
          continue;
 #if CONFIG_DEBUG_THREADS
       if( ! strcmp(line, "threads") )
-      { 
+      {
          dbgThreads();
          continue;
       }
@@ -683,11 +684,11 @@ void app_main(void)
       linenoiseFree(line);
       ThreadJob* job=ThreadJob_lcreate(sizeof(ThreadJob), executeOnLuaReplCB);
       if( ! job ) baFatalE(FE_MALLOC,0);
-      
+
       ThreadMutex_set(soDispMutex);
       LThreadMgr_run(&ltMgr, (ThreadJob*)job);
       ThreadMutex_release(soDispMutex);
-      
+
       xSemaphoreTake(luaLineBuffer.sem, portMAX_DELAY);
    }
 }
@@ -725,7 +726,7 @@ static void dbgThreads()
       if(a == f->exit) /* If not running */
       {
          esp_backtrace_frame_t bf = {
-            .pc = f->pc, .sp = f->a1, .next_pc = f->a0, .exc_frame = f}; 
+            .pc = f->pc, .sp = f->a1, .next_pc = f->a0, .exc_frame = f};
          printf("\nTASK %d", i);
          esp_backtrace_print_from_frame(100, &bf, true);
       }
