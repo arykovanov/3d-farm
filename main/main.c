@@ -9,6 +9,7 @@
    terms and conditions of the included License Agreement.
 */
 
+#include "HttpTrace.h"
 #include "esp_log_level.h"
 #include <sys/param.h>
 #include <time.h>
@@ -345,11 +346,13 @@ static void mainServerTask(Thread *t)
 #ifdef USE_DLMALLOC
    /* Allocate as much pSRAM as possible */
 #if CONFIG_IDF_TARGET_ESP32S3
-   EXT_RAM_BSS_ATTR static char poolBuf[3*1024*1024 + 5*1024];
+   #define DMALLOC_POOL_SIZE (3*1024*1024 + 5*1024)
 #else
-   EXT_RAM_BSS_ATTR static char poolBuf[3*1024*1024 + 5*1024];
+  #define DMALLOC_POOL_SIZE (3*1024*1024 + 5*1024)
 #endif
-   init_dlmalloc(poolBuf, poolBuf + sizeof(poolBuf));
+  EXT_RAM_BSS_ATTR static char poolBuf[DMALLOC_POOL_SIZE];
+  ESP_LOGI("dmalloc", "reserved %iKiB of PSRAM", DMALLOC_POOL_SIZE >> 10);
+  init_dlmalloc(poolBuf, poolBuf + sizeof(poolBuf));
 #else
    #error must use dlmalloc
 #endif
@@ -602,16 +605,19 @@ static void startMdnsService()
 void app_main(void)
 {
    // Disable the esp log system.
-   esp_log_level_set("*", ESP_LOG_VERBOSE);
+   esp_log_level_set("*", ESP_LOG_INFO);
 
    bool adapter = initComponents();
    manageConsole(true);
 
+   HttpTrace_printf(5,"Waiting for IP address..            ");
    for(int i = 0; i < 50 ; i++)
    {
       if(netGotIP()) break;
+      HttpTrace_printf(5,"Waiting for IP address: %i          \r", 50-i);
       Thread_sleep(100);
    }
+   HttpTrace_printf(5,"Waiting for IP address: done        \n");
    startMdnsService();
 
    /**
@@ -623,7 +629,10 @@ void app_main(void)
 
    if(!adapter)
    {
-      netWifiApStart(true);
+     HttpTrace_printf(5,"Starting Wi-Fi access point\n");
+     netWifiApStart(true);
+     HttpTrace_printf(5,"Wi-Fi access point ready\n");
+     HttpTrace_printf(5,"You can connect to an existing network with the code: esp32.netconnect('wifi', {ssid='',pwd=''})\n");
    }
 
    /*
@@ -639,6 +648,8 @@ void app_main(void)
                     " /_/ \\_\\___|\\__,_|\\__, |\\___|\n                   "
                     "__/ |     \n                  |___/      \n\n");
    HttpTrace_printf(5,"LuaShell32 ready.\n");
+
+   esp_log_level_set("*", ESP_LOG_INFO);
 
    /*
     * The app_main thread originally runs at low priority (ESP_TASK_MAIN_PRIO, or ESP_TASK_PRIO_MIN + 1).
