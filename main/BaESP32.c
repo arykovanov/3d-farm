@@ -80,8 +80,6 @@ LThreadMgr Documentation:
 #include "BaESP32.h"
 #include "CfgESP32.h"
 
-#include "impulse.h"
-
 #define ECHK ESP_ERROR_CHECK
 
 
@@ -3401,29 +3399,6 @@ static const luaL_Reg basLib[] = {
    {"mac", lmac}
 };
 
-static int lua_impulse_classify(lua_State* L)
-{
-   size_t imagesize = 0;
-   uint8_t* imageData = (uint8_t*)luaL_checklstring(L, 1, &imagesize);
-
-   const char* label = "unknown";
-   int ret = classify(imageData, imagesize, &label);
-   if (ret != 0) {
-      lua_pushnil(L);
-      lua_pushfstring(L,"impulse error: %i", ret);
-      return 2;
-   }
-
-   lua_pushstring(L, label);
-   return 1;
-}
-
-static const luaL_Reg impulseLib[] = {
-  {"classify", lua_impulse_classify},
-  {NULL, NULL}
-};
-
-
 #define RESERVED_PIN (void*)1  // Define a flag for reserved pins
 
 void installESP32Libs(lua_State* L)
@@ -3463,8 +3438,6 @@ void installESP32Libs(lua_State* L)
    luaL_newlib(L, esp32Lib);
    lua_setglobal(L,"esp32");
 
-   luaL_newlib(L, impulseLib);
-   lua_setglobal(L,"impulse");
 
    lua_getglobal(L, "ba");
    luaL_setfuncs(L,basLib,0);

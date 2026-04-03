@@ -35,9 +35,3 @@ I (1030) esp_psram: Adding pool of 1092K of PSRAM memory to heap allocator
 
 In the log output above you can see ~1MB of free memory for third party libraries.
 Image recognition models might require 1.5-3-7MB of memory and thus image recognition can fail with memory errors.
-
-
-Impulse Edge EON
-----------------
-
-This ESP32 project can run model from project https://studio.edgeimpulse.com/public/790245/live
