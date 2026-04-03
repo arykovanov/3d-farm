@@ -1,0 +1,12 @@
+{
+  "apps": [
+    {
+      "name": "lsp_app",
+      "path": "./lsp_app",
+      "autoReload": true
+    }
+  ],
+  "esp32": {
+    "ip": "192.168.0.104"
+  }
+}
