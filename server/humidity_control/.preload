@@ -1,0 +1,77 @@
+xedge.createloader(io)
+
+local function log(...)
+  tracep(false, 0, ba.datetime("NOW"), ...)
+end
+
+-- _G.uaServer = require("ua_server")
+
+-- trace("loading relay module")
+-- local relay = require("relay")
+-- trace("loading dht11 module")
+local dht11 = require("dht11")
+
+-- trace("Init relay on pin 5")
+-- local relay_switch = relay(5)
+
+local humidity = 100
+local temperature = 0
+
+local function DHT11Callback(h, t, err)
+  if err then
+    log("dht11 error:", err)
+    return
+  end
+
+  humidity = tonumber(h)
+  temperature = tonumber(t)
+  log(string.format("Humidity: %s%% Temperature: %sC", humidity, temperature))
+end
+
+function hum()
+  while true do
+    log("Reading humidity from pin 4")
+    dht11(4, DHT11Callback)
+    coroutine.yield(true)
+  end
+end
+
+function relay_f()
+  local relay <close> = esp32.gpio(5,"INOUT", {pullup=true})
+  while true do
+    local relayEnabled = false
+    if temperature < 40 then
+      log("Temperature lower than 40C")
+      relayEnabled = true
+    end
+    
+    if humidity > 20 then
+      log("Humidity highier than 20%")
+      relayEnabled = true
+    end
+      
+    log(string.format("Set relay state to: %s", relayEnabled and "Enabled" or "Disabled"))
+    relay:value(relayEnabled)
+    local realValue = relay:value()
+    log(string.format("Real pin value = %s (required %s)", realValue, relayEnabled))
+    while realValue ~= relayEnabled do
+      relay:value(relayEnabled)
+      realValue = relay:value()
+      log(string.format("Real pin value = %s (required %s)", realValue, relayEnabled))
+    end
+
+    coroutine.yield(true)
+  end
+end
+
+humidityTimer = ba.timer(hum)
+relayTimer = ba.timer(relay_f)
+
+humidityTimer:set(1000)
+relayTimer:set(1000)
+
+function onunload()
+  log("Stopping timers")
+  humidityTimer:cancel()
+  relayTimer:cancel()
+end

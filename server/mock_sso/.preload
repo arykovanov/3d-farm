@@ -1,0 +1,398 @@
+local fmt=string.format
+
+local conf=require"loadconf"
+
+local openid = conf.openid
+
+
+local function genCertificate(certType, hostname)
+  local basic128rsa15Config = {
+    key="rsa",
+    bits=2048
+  }
+
+  local basic128rsa15Key = ba.create.key(basic128rsa15Config)
+  local basic128rsa15Dn = {
+    commonname = hostname,
+  }
+  local alternativeNames = hostname
+  local certtype = type(certType) == "string" and {certType} or certType
+  local keyusage = {
+    "DIGITAL_SIGNATURE",
+    "NON_REPUDIATION",
+    "KEY_ENCIPHERMENT",
+    "DATA_ENCIPHERMENT",
+    "KEY_AGREEMENT",
+    "KEY_CERT_SIGN"
+  }
+
+  local hashid = "sha256"
+  local basic128rsa15Csr = ba.create.csr(basic128rsa15Key, basic128rsa15Dn, alternativeNames, certtype, keyusage, hashid)
+  local validFrom=ba.datetime("NOW")
+  validFrom = validFrom - {days=1}
+  validFrom = validFrom:date(true)
+
+  local validTo=ba.datetime("NOW")
+  validTo = validTo + {days=3650}
+  validTo = validTo:date(true)
+  local serial = 123456
+
+  local basic128rsa15Cert = ba.create.certificate(basic128rsa15Csr, basic128rsa15Key, validFrom, validTo, serial)
+  return basic128rsa15Cert, basic128rsa15Key
+end
+
+local rsaCert, rsaKey = genCertificate("OBJECT_SIGNING", "localhost")
+
+local function base64url(data)
+  return ba.b64urlencode(data)
+end
+
+
+-- Generate keys to mimic the MS discovery/keys endpoint format
+local function generateJwkKey()
+   -- Dependencies. You must have a crypto/rsa library and proper base64url functions.
+   -- We'll assume ba.b64urlencode exists and a ba.crypto.genrsa(bits) giving {e, n, d, ...}
+
+   local n,e =  ba.crypto.keyparams(rsaKey)
+   -- The kid typically is a hash/fingerprint of the public key; here random
+   local kid = base64url(ba.rndbs(16))
+   local x5t = kid   -- For a real x5t, use SHA-1 of DER cert
+
+   -- (Optional) If you have a PEM or DER certificate for the public key, encode x5c field as base64(der)
+   local x5c = base64url(rsaCert)    -- keep empty, or fill with dummy/real cert chain if available
+
+   return {
+      kty = "RSA",
+      use = "sig",
+      kid = kid,
+      x5t = x5t,
+      n = base64url(n), -- modulus as base64url
+      e = base64url(e), -- exponent as base64url
+      x5c = x5c,
+      cloud_instance_name = "microsoftonline.com"
+   }
+end
+
+local jwkKey = generateJwkKey()
+trace("JWK:", ba.json.encode(jwkKey))
+
+
+
+local jwt = require"jwt"
+
+local function getKeys(request, response)
+  if request:method() ~= "GET" then
+    response:senderror(405, "Method not allowed")
+    return
+  end
+
+  response:setstatus(200)
+  response:json({
+    keys = {
+      [1] =  jwkKey
+    }
+  })
+end
+
+local tokens = {}
+
+local function htmlEscape(value)
+  local text = tostring(value or "")
+  text = text:gsub("&", "&amp;")
+  text = text:gsub("<", "&lt;")
+  text = text:gsub(">", "&gt;")
+  text = text:gsub('"', "&quot;")
+  text = text:gsub("'", "&#39;")
+  return text
+end
+
+local function readParams(request)
+  tracep(false, 0, "Login params:")
+  local params = {}
+  for name,value in request:datapairs() do
+    tracep(false, 0, fmt("  %s='%s'",name, value))
+    params[name] = value
+  end
+  return params
+end
+
+local function sendFormPost(response, redirectUri, data)
+  local inputs = {}
+  for key, value in pairs(data) do
+    inputs[#inputs + 1] = fmt(
+      '<input type="hidden" name="%s" value="%s">',
+      htmlEscape(key),
+      htmlEscape(value)
+    )
+  end
+  local body = fmt([[
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Mock Microsoft Login</title>
+  </head>
+  <body>
+    <p>Signing you in...</p>
+    <form id="mock-login" method="post" action="%s">
+      %s
+    </form>
+    <script>
+      document.getElementById("mock-login").submit();
+    </script>
+  </body>
+</html>
+]], htmlEscape(redirectUri), table.concat(inputs, "\n      "))
+  response:setstatus(200)
+  response:setheader("Content-Type", "text/html")
+  response:write(body)
+end
+
+local function buildJwt(payload)
+  return jwt.sign(payload, rsaKey, {alg="RS256", kid=jwkKey.kid})
+end
+
+local function uuidv4()
+  local b = ba.rndbs(16)
+  local bytes = {b:byte(1, 16)}
+  bytes[7] = (bytes[7] % 16) + 64
+  bytes[9] = (bytes[9] % 64) + 128
+  local function hex(i) return string.format("%02x", i) end
+  return table.concat({
+    hex(bytes[1]), hex(bytes[2]), hex(bytes[3]), hex(bytes[4]), "-",
+    hex(bytes[5]), hex(bytes[6]), "-",
+    hex(bytes[7]), hex(bytes[8]), "-",
+    hex(bytes[9]), hex(bytes[10]), "-",
+    hex(bytes[11]), hex(bytes[12]), hex(bytes[13]), hex(bytes[14]), hex(bytes[15]), hex(bytes[16])
+  })
+end
+
+local function unixSeconds(dt)
+  local secs = select(1, dt:ticks())
+  return secs
+end
+
+local function buildQuery(params)
+  local parts = {}
+  for key, value in pairs(params) do
+    if value and value ~= "" then
+      parts[#parts + 1] = fmt("%s=%s", ba.urlencode(key), ba.urlencode(value))
+    end
+  end
+  return table.concat(parts, "&")
+end
+
+local function forwardLoginForm(request, response, params)
+  local authorizeUri = request:uri()
+  trace(fmt("authorizeUri: '%s'", authorizeUri))
+  local query = buildQuery({
+    authorize_url = authorizeUri,
+    client_id = params["client_id"],
+    redirect_uri = params["redirect_uri"],
+    response_type = params["response_type"],
+    response_mode = params["response_mode"],
+    scope = params["scope"],
+    state = params["state"],
+    nonce = params["nonce"]
+  })
+
+  local url = string.format("http://localhost:%d/sso/index.lsp?", mako.port) .. query
+  trace(fmt("forwarding to '%s'", url))
+  response:sendredirect(url)
+end
+
+local function authorize(request, response)
+  local params = readParams(request)
+  local redirectUri = params["redirect_uri"]
+  if not redirectUri then
+    response:senderror(400, "Missing redirect_uri")
+    return
+  end
+
+  local username = params["username"]
+  local password = params["password"]
+
+  local claims = {}
+  if params["write"] == "on" then
+    table.insert(claims, "write")
+  end
+  if params["read"] == "on" then
+    table.insert(claims, "read")
+  end
+
+  if not username or username == "" or not password or password == "" then
+    forwardLoginForm(request, response, params)
+    return
+  end
+
+  local code = base64url(ba.rndbs(48))
+  tokens[code] = {
+    client_id = params["client_id"],
+    redirect_uri = redirectUri,
+    state = params["state"],
+    scope = params["scope"],
+    nonce = params["nonce"],
+    issued = ba.datetime("NOW"):tostring(),
+    username = username,
+    claims = claims
+  }
+
+  if params["response_mode"] == "form_post" then
+    tracep(false, 0, "Show login form")
+    sendFormPost(response, redirectUri, {
+      code = code,
+      state = params["state"] or ""
+    })
+    return
+  end
+
+  local delimiter = redirectUri:find("?", 1, true) and "&" or "?"
+  local redirect = fmt("%s%scode=%s", redirectUri, delimiter, ba.urlencode(code))
+  if params["state"] then
+    redirect = redirect .. "&state=" .. ba.urlencode(params["state"])
+  end
+  trace(fmt("authorize: redirecting to '%s'", redirect))
+  response:sendredirect(redirect)
+end
+
+local function token(request, response)
+  if request:method() ~= "POST" then
+    response:senderror(405, "Method not allowed")
+    return
+  end
+
+  local params = readParams(request)
+  local code = params["code"]
+  local grantType = params["grant_type"]
+  local clientId = params["client_id"]
+  local clientSecret = params["client_secret"]
+
+  if grantType ~= "authorization_code" then
+    response:setstatus(400)
+    response:json({error="unsupported_grant_type"})
+    return
+  end
+
+  local tokenInfo = code and tokens[code]
+  if not tokenInfo then
+    response:setstatus(400)
+    response:json({error="invalid_grant", error_description="Invalid or expired code"})
+    return
+  end
+
+  if tokenInfo.client_id and clientId and tokenInfo.client_id ~= clientId then
+    response:setstatus(400)
+    response:json({error="invalid_client", error_description="Client mismatch"})
+    return
+  end
+
+  if openid.client_id and clientId and openid.client_id ~= clientId then
+    response:setstatus(400)
+    response:json({error="invalid_client", error_description="Unknown client_id"})
+    return
+  end
+
+  if openid.client_secret and clientSecret and openid.client_secret ~= clientSecret then
+    response:setstatus(400)
+    response:json({error="invalid_client", error_description="Invalid client_secret"})
+    return
+  end
+
+  if tokenInfo.redirect_uri and params["redirect_uri"] and tokenInfo.redirect_uri ~= params["redirect_uri"] then
+    response:setstatus(400)
+    response:json({error="invalid_grant", error_description="redirect_uri mismatch"})
+    return
+  end
+
+  tokens[code] = nil
+
+  local now = ba.datetime("NOW")
+  local exp = now + {mins=60}
+  local nowSec = unixSeconds(now)
+  local expSec = unixSeconds(exp)
+  local iss = fmt("https://login.microsoftonline.com/%s/v2.0", openid.tenant)
+  local oid = uuidv4()
+  local username = tokenInfo.username or "mock.user@example.com"
+
+  local idPayload = {
+    aud = clientId or openid.client_id,
+    iss = iss,
+    iat = nowSec,
+    nbf = nowSec,
+    exp = expSec,
+    nonce = tokenInfo.nonce,
+    sub = oid,
+    oid = oid,
+    upn = username,
+    preferred_username = username,
+    claims = tokenInfo.claims,
+    name = username,
+    ver = "2.0",
+    tid = openid.tenant
+  }
+
+  local accessPayload = {
+    aud = clientId or openid.client_id,
+    iss = iss,
+    iat = nowSec,
+    nbf = nowSec,
+    exp = expSec,
+    scp = tokenInfo.scope or "openid profile",
+    sub = oid,
+    tid = openid.tenant,
+    oid = oid,
+    ver = "2.0"
+  }
+
+  trace(fmt("idPayload: %s", ba.json.encode(idPayload)))
+  trace(fmt("accessPayload: %s", ba.json.encode(accessPayload)))
+
+  local idToken, idErr = buildJwt(idPayload)
+  if not idToken then
+    response:setstatus(500)
+    response:json({error="server_error", error_description=idErr or "JWT sign failed"})
+    return
+  end
+
+  local accessToken, accessErr = buildJwt(accessPayload)
+  if not accessToken then
+    response:setstatus(500)
+    response:json({error="server_error", error_description=accessErr or "JWT sign failed"})
+    return
+  end
+
+  response:setstatus(200)
+  response:json({
+    token_type = "Bearer",
+    expires_in = 3600,
+    scope = tokenInfo.scope or "openid profile",
+    id_token = idToken,
+    access_token = accessToken
+  })
+end
+
+local function tenant(env, relpath)
+  local request=env.request -- and response
+  local response = env.response
+  if relpath == "discovery/keys" then
+    trace("Returning OpenID keys")
+    getKeys(request, response)
+    return
+  elseif relpath == "oauth2/v2.0/authorize" then
+    trace("Authorization started")
+    authorize(request, response)
+    return
+  elseif relpath == "oauth2/v2.0/token" then
+    trace("Token request")
+    token(request, response)
+    return
+  end
+
+  response:senderror(404)
+end
+
+local keysPath=openid.tenant
+trace(fmt("Adding new endpoint for downloading keys: %s", keysPath))
+local keysDir=ba.create.dir(keysPath)
+keysDir:setfunc(tenant)
+dir:insert(keysDir,true)
