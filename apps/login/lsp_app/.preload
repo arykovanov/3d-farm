@@ -1,0 +1,386 @@
+mako.createloader(io)
+trace("Login app loaded")
+
+local conf = require("loadconf")
+
+local google_config_url
+local ms_config_url
+if conf.oauth_portal then
+   google_config_url = conf.oauth_portal
+   ms_config_url = conf.oauth_portal
+else
+   google_config_url = "https://accounts.google.com/.well-known/openid-configuration"
+   ms_config_url = string.format("https://login.microsoftonline.com/%s/v2.0/.well-known/openid-configuration", conf.microsoft.tenant)
+end
+
+local function getOauthConfig(url)
+  local http = require"httpm".create{trusted=verifyTrust}
+  local config, err = http:json(url, {})
+  if not config then
+    error(string.format("Failed to decode OAuth config from %s: %s", url, err))
+  end
+
+  if not config.authorization_endpoint or not config.token_endpoint then
+    trace("OAuth config from " .. url .. " is missing authorization_endpoint or token_endpoint")
+    error("Invalid oauth config from " .. url)
+  end
+
+  tracep(false, 0, "auth_url: " .. config.authorization_endpoint)
+  tracep(false, 0, "token_url: " .. config.token_endpoint)
+  tracep(false, 0, "userinfo_url: " .. (config.userinfo_endpoint or ""))
+
+  return {
+    auth_url = config.authorization_endpoint,
+    token_url = config.token_endpoint,
+    user_info_url = config.userinfo_endpoint, -- UserInfo might not be present in some configs
+  }
+end
+
+local config
+
+local function authConfig()
+  if not config then
+    local google_config = getOauthConfig(google_config_url)
+    local ms_config = getOauthConfig(ms_config_url)
+
+    config = {
+      -- Google OAuth
+      google = {
+          client_id = conf.google.client_id,
+          client_secret = conf.google.client_secret,
+          auth_url = google_config.auth_url,
+          token_url = google_config.token_url,
+          user_info_url = google_config.user_info_url,
+          scope = "openid email profile"
+      },
+      -- Microsoft Entra ID (Azure AD)
+      microsoft = {
+          client_id = conf.microsoft.client_id,
+          client_secret = conf.microsoft.client_secret,
+          tenant_id = conf.microsoft.tenant,
+          auth_url = ms_config.auth_url,
+          token_url = ms_config.token_url,
+          user_info_url = ms_config.user_info_url,
+          scope = "openid email profile"
+      },
+
+      -- Internal settings
+      jwt_secret = ba.rndbs(32),
+      token_expiry = 3600 * 24, -- 24 hours
+      cookie_name = "auth_token"
+    }
+  end
+  return config
+end
+
+-- Authentication module for Login Application
+local b64enc, jenc = ba.b64urlencode, ba.json.encode
+local b64dec, jdec = ba.b64decode, ba.json.decode
+local function table2B64(t) return b64enc(jenc(t)) end
+
+local function shallowCopy(t)
+   local newTable = {}
+   for k, v in pairs(t) do newTable[k] = v end
+   return newTable
+end
+
+local function sign(payload, secret, options)
+   options = options and shallowCopy(options) or {alg="HS256"}
+   options.typ = "JWT"
+   if options.kid then options.kid = tostring(options.kid) end
+   local signature, err
+   local header = table2B64(options)
+   payload = type(payload) == "table" and table2B64(payload) or payload
+   local data = header .. "." .. payload
+   local alg,htype=options.alg:sub(1,2),options.alg:sub(3)
+   if "HS" == alg then
+      signature=b64enc(ba.crypto.hash("hmac","sha"..htype, secret)(data)(true))
+   else
+      local hash = ba.crypto.hash("sha"..htype)(data)(true)
+      if "function" == type(secret) then
+         signature,err=secret(hash)
+      else
+         signature,err=ba.crypto.sign(hash, secret)
+      end
+      if not signature then return nil, err end
+      if "ES" == alg then
+	 local r, s = ba.crypto.sigparams(signature)
+	 if not r or not s then return nil, "Unknown ECDSA signature" end
+	 signature = b64enc(r .. s)
+      elseif "RS" == alg then
+	 signature = b64enc(signature)
+      end
+   end
+   if not signature then
+      return nil,"Unsupported algorithm"
+   end
+   return header .. "." .. payload .. "." .. signature, {
+      protected = header,
+      payload = payload,
+      signature = signature
+   }
+end
+
+local function verify(jwt, secret, kid)
+   local headerB64, payloadB64, signatureB64 = jwt:match("([^.]*)%.([^.]*)%.([^.]*)")
+   if not (headerB64 and payloadB64 and signatureB64) then
+      return nil, "Invalid JWT format"
+   end
+   local header = jdec(b64dec(headerB64))
+   if not header or not header.alg then
+      return nil, "Invalid JWT header"
+   end
+   if true == kid then
+      kid=header.kid
+      if not kid then return nil, "no kid in payload" end
+      secret=secret[kid]
+      if not secret then return nil, "Secret not found for kid: "..tostring(kid) end
+   end
+   local data = headerB64 .. "." .. payloadB64
+   local signature = b64dec(signatureB64)
+   local alg,htype=header.alg:sub(1,2),header.alg:sub(3)
+   if "HS" == alg then
+      local expectedSig = ba.crypto.hash("hmac", "sha"..htype, secret)(data)(true)
+      return expectedSig == signature, jdec(b64dec(payloadB64))
+   else
+      local hash = ba.crypto.hash("sha"..htype)(data)(true)
+      if "ES" == alg then
+	 local mid=#signature//2
+	 local r,s = signature:sub(1,mid),signature:sub(mid+1)
+	 signature=ba.crypto.sigparams(r,s)
+	 if not signature then return nil,"Invalid signature" end
+      end
+      local isValid
+      if "table" == type(secret) then
+	 local op=secret
+	 if not ((op.x and op.y) or (op.n and op.e)) then
+	    error("Missing keyparams",2)
+	 end
+	 isValid=ba.crypto.verify(signature, hash, op)
+      else
+	 isValid=ba.crypto.verify(signature, secret, hash)
+      end
+      return isValid, header, jdec(b64dec(payloadB64))
+   end
+end
+
+local function signToken(payload)
+   return sign(payload, authConfig().jwt_secret, {alg = "HS256"})
+end
+
+local function verifyToken(token)
+   return verify(token, authConfig().jwt_secret)
+end
+
+local function getUserFromRequest(request)
+  tracep(false, 0, "Getting user from request")
+  local cookie = request:cookie(authConfig().cookie_name)
+  if not cookie then 
+    tracep(false, 0, "No token found in cookie")
+    return nil 
+  end
+  local token = cookie:value()
+  local ok, payload = verifyToken(token)
+  if not ok then 
+    tracep(false, 0, "Token verification failed")
+    return nil 
+  end
+  tracep(false, 0, "Token verified successfully")
+  return payload
+end
+
+local function getAuthUrl(provider, state, redirectUri)
+   local config = authConfig()
+   local p = config[provider]
+   if not p then return nil, "Unknown provider" end
+   
+   local url = p.auth_url .. "?" ..
+      "client_id=" .. ba.urlencode(p.client_id) ..
+      "&response_type=code" ..
+      "&redirect_uri=" .. ba.urlencode(redirectUri) ..
+      "&scope=" .. ba.urlencode(p.scope) ..
+      "&state=" .. ba.urlencode(state)
+   
+   return url
+end
+
+local function exchangeCode(provider, code, redirectUri)
+  tracep(false, 0, "Exchanging grant code to token")
+   local config = authConfig()
+   local p = config[provider]
+   if not p then
+      return nil, "Unknown provider "..provider
+   end
+   local http = require"httpm".create{trusted=false}
+   local status,data = http:post(p.token_url,
+        {
+          client_id=p.client_id,
+          client_secret=p.client_secret,
+          code=code,
+          redirect_uri=redirectUri,
+          grant_type="authorization_code"
+        })
+
+   if status ~= 200 then
+      return nil, "Token Exchange failed: Status " .. tostring(status) .. ", " .. tostring(data)
+   end
+   
+   local tokenData = ba.json.decode(data)
+   return tokenData
+end
+
+local function getUserInfo(provider, accessToken)
+   local config = authConfig()
+   local p = config[provider]
+   if not p then return nil, "Unknown provider" end
+    if not p.user_info_url then
+      return {
+        id = "4139cede-ab4f-4ece-8b09-f586c288fe7b",
+        email = "admin",
+        name = "admin",
+      }
+    end
+
+   local http = require"httpc"
+   local h = http.create()
+   local options = {
+      url = p.user_info_url,
+      header = {
+         ["Authorization"] = "Bearer " .. accessToken
+      }
+   }
+   
+   local ok, err = h:request(options)
+   if not ok then return nil, "HTTP request failed: " .. tostring(err) end
+   
+   local s = h:status()
+   local data = h:read("*a")
+   h:close()
+   
+   if s ~= 200 then
+      return nil, "Get User Info failed: Status " .. s .. ", " .. tostring(data)
+   end
+   
+   local userData = ba.json.decode(data)
+   return userData
+end
+
+local function main(request, response, provider)
+  tracep(false, 0, string.format("Login app request: %s", request:uri()))
+  -- Login Application Entry Point
+
+  -- 1. Check if we already have a session
+  local user = getUserFromRequest(request)
+  local redirectUrl = request:header("Referer") or "/" -- Where we came from
+  if redirectUrl:match(request:header("Host") .. "/login") then
+    redirectUrl = "/"
+  end
+    
+  tracep(false, 0, string.format("redirectUrl: %s", redirectUrl))
+
+  if user then
+    -- Already logged in, redirect back
+    response:sendredirect(redirectUrl)
+    return
+  end
+
+  -- 2. Handle provider redirects or API calls if needed.
+  -- In a React frontend, we might want to handle provider selections there.
+  -- When a user clicks a "Google Login" button, they'll go to index.lsp?provider=google
+  local url
+  if provider and provider ~= "" then
+    -- Step 1: Initiate OAuth flow
+    local state = ba.urlencode(ba.b64encode(ba.json.encode({redirect = redirectUrl})))
+    local redirectUri = "http://" .. request:header("Host") .. "/login/callback"
+    url, err = getAuthUrl(provider, state, redirectUri)
+  else
+    url = "http://" .. request:header("Host") .. "/login/form.html"
+  end
+
+  -- 3. Serve the React Frontend (React app files)
+  -- For now, if the build doesn't exist, we'll return a simple React entry point.
+  -- Use the standard static file serving logic in LSP if needed.
+
+  tracep(false, 0, string.format("redirect url: %s", url))
+  if url then
+    response:sendredirect(url)
+    return
+  else
+    response:senderror(400, "Error: " .. tostring(err))
+    return
+  end
+end
+
+local function callback(request, response)
+  local config = authConfig()
+  -- OAuth2 Callback Handler for Login Application
+  local code = request:data("code")
+  local state = request:data("state")
+  local provider = request:data("provider") or "google" -- default to google, but better to detect from state
+
+  -- Decode the state for return URL
+  local stateData = ba.json.decode(ba.b64decode(ba.urldecode(state)))
+  local returnUrl = stateData.redirect or "/"
+
+  if not code then
+    response:senderror(400, "OAuth code missing")
+    return
+  end
+
+  -- 1. Exchange code for token
+  local redirectUri = "http://" .. request:header("Host") .. "/login/callback"
+  local tokenData, err = exchangeCode(provider, code, redirectUri)
+
+  if not tokenData then
+    response:senderror(401, "Token exchange failed: " .. tostring(err))
+    return
+  end
+
+  -- 2. Get user info
+  local userInfo, err = getUserInfo(provider, tokenData.access_token)
+
+  if not userInfo then
+    response:senderror(401, "User info retrieval failed: " .. tostring(err))
+    return
+  end
+
+  -- 3. Issue JWT token
+  local jwtToken, err = signToken({
+    id = userInfo.sub or userInfo.id,
+    email = userInfo.email,
+    name = userInfo.name,
+    iat = os.time(),
+    exp = os.time() + config.token_expiry
+  })
+
+  if not jwtToken then
+    response:senderror(500, "JWT generation failed: " .. tostring(err))
+    return
+  end
+
+  -- 4. Set cookie and redirect back to initial page
+  local cookie = response:createcookie(config.cookie_name)
+  cookie:value(jwtToken)
+  cookie:path("/")
+  cookie:httponly(true)
+  cookie:activate()
+  response:sendredirect(returnUrl)
+end
+
+local function apiFunc(env, relpath)
+  tracep(false, 0, string.format("******************************"))
+  local request=env.request -- and response
+  local response = env.response
+  tracep(false, 0, string.format("apiFunc: %s", relpath))
+  if relpath == "callback" then
+    tracep(false, 0, "Called OAUTH callback")
+    callback(request, response)
+  elseif relpath == "google" or relpath == "microsoft" or relpath == "" then
+    tracep(false, 0, "Show login")
+    main(request, response, relpath)
+  end
+end
+
+local mainDir=ba.create.dir()
+mainDir:setfunc(apiFunc)
+dir:insert(mainDir,true)

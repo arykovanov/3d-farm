@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && cp -a lsp_app/. dist/ && node postbuild.js",
+    "build": "tsc -b && vite build && cp -a lsp_app/. dist/",
     "lint": "eslint .",
     "preview": "vite preview"
   },

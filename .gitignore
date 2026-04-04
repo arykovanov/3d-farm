@@ -3,4 +3,8 @@
 doc/_build
 Build-Resources
 .cache
-partitions/nvs_xedge_values.csv
+**/nvs_xedge_values.csv
+**/managed_components
+**/build
+**/dist
+**/node_modules

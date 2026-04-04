@@ -8,7 +8,7 @@ const App: React.FC = () => {
 
   const handleOAuth = (provider: string) => {
     // Redirect through the LSP app entry point
-    window.location.href = `/login/lsp_app/index.lsp?provider=${provider}`;
+    window.location.href = `/login/${provider}`;
   };
 
   const handleInternalLogin = (e: React.FormEvent) => {

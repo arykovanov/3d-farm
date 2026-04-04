@@ -4,14 +4,14 @@ trim_trailing_whitespace = true
 insert_final_newline = true
 
 [*.lua]
-indent_size = 3
+indent_size = 2
 
 [*.lsp]
-indent_size = 3
+indent_size = 2
 
 # LUA Configuration files (mako.conf, etc.)
 [*.conf]
-indent_size = 3
+indent_size = 2
 
 [*.md]
 indent_size = 2
