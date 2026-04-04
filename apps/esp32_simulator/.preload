@@ -1,0 +1,81 @@
+_G.esp32 = _G.esp32 or {}
+
+_G.esp32.rmtrx = function(config)
+  local rx = {
+    config = config,
+    receive = function(self, args)
+      self.recv_args = args
+    end,
+    close = function(self) end
+  }
+  setmetatable(rx, {__close = function(self) self:close() end})
+  return rx
+end
+
+humidity = os.clock()
+temperature = os.clock()
+
+_G.esp32.rmttx = function(config, rx)
+  local tx = {
+    config = config,
+    rx = rx,
+    enable = function(self) end,
+    transmit = function(self, opts, data)
+
+      humidity = humidity + 0.1
+      temperature = temperature + 0.3
+      if humidity > 100 then
+        humidity = 0
+      end
+      if temperature > 100 then
+        temperature = 0
+      end
+
+      local symbols = {}
+      local h_int = math.floor(humidity)
+      local h_dec = math.floor((humidity - h_int) * 10)
+      local t_int = math.floor(temperature)
+      local t_dec = math.floor((temperature - t_int) * 10)
+      local sum = (h_int + h_dec + t_int + t_dec) & 0xFF
+      
+      local function emit_byte(b)
+        for i = 7, 0, -1 do
+          local bit = (b >> i) & 1
+          local high_time = bit == 1 and 40 or 20
+          table.insert(symbols, {0, 50, 1, high_time})
+        end
+      end
+
+      emit_byte(h_int)
+      emit_byte(h_dec)
+      emit_byte(t_int)
+      emit_byte(t_dec)
+      emit_byte(sum)
+
+      local t
+      t = ba.timer(function()
+        t:cancel()
+        if rx.config and rx.config.callback then
+          rx.config.callback(symbols, false)
+        end
+      end)
+      t:set(10)
+    end,
+    close = function(self) end
+  }
+  setmetatable(tx, {__close = function(self) self:close() end})
+  return tx
+end
+
+_G.esp32.gpio = function(pin, mode, opts)
+  local obj = {
+    _val = false,
+    value = function(self, v)
+      if v ~= nil then self._val = v end
+      return self._val
+    end,
+    close = function(self) end
+  }
+  setmetatable(obj, {__close = function(self) self:close() end})
+  return obj
+end

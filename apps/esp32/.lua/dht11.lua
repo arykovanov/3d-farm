@@ -42,19 +42,18 @@ local function getByte(symbols, zidx)
 end
 
 local function decodeDHT11(symbols)
- if #symbols < 40 then
-   raise("too few symbols")
- end
+  if #symbols < 40 then
+    raise("too few symbols")
+  end
 
  -- Sorry, zero based indexes...
- local byte1 = getByte(symbols, 0)
- local byte2 = getByte(symbols, 1)
- local byte3 = getByte(symbols, 2)
- local byte4 = getByte(symbols, 3)
- local byte5 = getByte(symbols, 4)
- local sum = (byte1 + byte2 + byte3 + byte4) & 0xFF
- -- trace(string.format("byte1=%s, byte2=%s, byte3=%s, byte3=%s, byte5=%s, sum=%s",
- --byte1,byte2,byte3,byte4,byte5,sum))
+  local byte1 = getByte(symbols, 0)
+  local byte2 = getByte(symbols, 1)
+  local byte3 = getByte(symbols, 2)
+  local byte4 = getByte(symbols, 3)
+  local byte5 = getByte(symbols, 4)
+  local sum = (byte1 + byte2 + byte3 + byte4) & 0xFF
+--   trace(string.format("byte1=%s, byte2=%s, byte3=%s, byte3=%s, byte5=%s, sum=%s", byte1,byte2,byte3,byte4,byte5,sum))
 
  if sum ~= byte5 then
    raise("checkum")

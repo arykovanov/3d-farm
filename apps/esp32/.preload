@@ -1,4 +1,8 @@
-xedge.createloader(io)
+if xedge then
+  xedge.createloader(io)
+else
+  mako.createloader(io)
+end
 
 local function log(...)
   tracep(false, 0, ba.datetime("NOW"), ...)

@@ -3,3 +3,4 @@
 doc/_build
 Build-Resources
 .cache
+partitions/nvs_xedge_values.csv
