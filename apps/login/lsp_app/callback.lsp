@@ -13,8 +13,8 @@ local stateData = ba.json.decode(ba.b64urldecode(state))
 local returnUrl = stateData.redirect or "/"
 
 if not code then
-   response:status(400)
-   return response:write("OAuth code missing")
+   response:senderror(400, "OAuth code missing")
+   return
 end
 
 -- 1. Exchange code for token
@@ -22,16 +22,16 @@ local redirectUri = "https://" .. request:header("Host") .. "/login/lsp_app/call
 local tokenData, err = oauth.exchangeCode(provider, code, redirectUri)
 
 if not tokenData then
-   response:status(401)
-   return response:write("Token exchange failed: " .. tostring(err))
+   response:senderror(401, "Token exchange failed: " .. tostring(err))
+   return
 end
 
 -- 2. Get user info
 local userInfo, err = oauth.getUserInfo(provider, tokenData.access_token)
 
 if not userInfo then
-   response:status(401)
-   return response:write("User info retrieval failed: " .. tostring(err))
+   response:senderror(401, "User info retrieval failed: " .. tostring(err))
+   return
 end
 
 -- 3. Issue JWT token
@@ -44,13 +44,12 @@ local jwtToken, err = auth.signToken({
 })
 
 if not jwtToken then
-   response:status(500)
-   return response:write("JWT generation failed: " .. tostring(err))
+   response:senderror(500, "JWT generation failed: " .. tostring(err))
+   return
 end
 
 -- 4. Set cookie and redirect back to initial page
 response:header("Set-Cookie", config.cookie_name .. "=" .. jwtToken .. "; Path=/; HttpOnly; SameSite=Strict")
-response:header("Location", returnUrl)
-response:status(302)
+response:sendredirect(returnUrl)
 ?>
 Redirecting to <a href="<?lsp=returnUrl?>"><?lsp=returnUrl?></a>...

@@ -6,8 +6,7 @@ return function(request, response)
    if not user then
       -- Redirect to login app
       local currentUrl = request:url()
-      response:header("Location", "/login/lsp_app/index.lsp")
-      response:status(302)
+      response:sendredirect("/login/")
       return nil
    end
    return user

@@ -17,11 +17,17 @@ local function field(name, default)
   return tostring(value)
 end
 
-local authorizeUrl = field("authorize_url")
-if authorizeUrl == "" then
-  response:write("<p>Missing authorize_url</p>")
-  return
-end
+local conf=require"loadconf"
+local openid = conf.mock_sso
+local host = request:header("host") or fmt("localhost:%d", mako.port)
+local conf=require"loadconf"
+
+local openid = conf.mock_sso
+local conf=require"loadconf"
+
+local openid = conf.mock_sso
+local authorizeUrl = string.format("http://%s/sso/%s/oauth2/v2.0/authorize", host, openid.tenant)
+trace(authorizeUrl)
 
 local clientId = field("client_id")
 local redirectUri = field("redirect_uri")

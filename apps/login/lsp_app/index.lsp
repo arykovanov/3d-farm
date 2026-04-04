@@ -10,8 +10,7 @@ local redirectUrl = request:header("Referer") or "/" -- Where we came from
 
 if user then
    -- Already logged in, redirect back
-   response:header("Location", redirectUrl)
-   response:status(302)
+   response:sendredirect(redirectUrl)
    return
 end
 
@@ -27,12 +26,10 @@ if provider then
    local url, err = oauth.getAuthUrl(provider, state, redirectUri)
    
    if url then
-      response:header("Location", url)
-      response:status(302)
+      response:sendredirect(url)
       return
    else
-      response:status(400)
-      response:write("Error: " .. tostring(err))
+      response:senderror(400, "Error: " .. tostring(err))
       return
    end
 end

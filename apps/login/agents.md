@@ -31,3 +31,10 @@ Implement an LSP application for OAuth login (Microsoft, Google, Internal) with 
 4. **Final Polish**:
   - Smooth transitions and animations (Glacier theme).
   - Error handling.
+
+# Testing.
+
+## Use mock_sso
+
+1. open /login/ page it asks to enter username/password..
+2. it redirects to /sso page where you can enter username/password and get JWT token.

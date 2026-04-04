@@ -5,7 +5,7 @@ else
 end
 
 local function log(...)
-  tracep(false, 0, ba.datetime("NOW"), ...)
+  -- tracep(false, 0, ba.datetime("NOW"), ...)
 end
 
 -- _G.uaServer = require("ua_server")

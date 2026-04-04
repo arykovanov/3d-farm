@@ -19,3 +19,19 @@ Use LUA 5.5 syntax
 
 * login - login web interface. all applications must redirect to /api/login if user is not authenticated.
 * mock_sso - a mock SSO server for testing purposes.
+
+## Application structure
+
+Every application must have the following structure:
+
+* root folder contains react project if it has web interface.
+* lsp_app - LUA/LSP code
+  * root folder contains lsp files.
+  * `.lua` folder contains lua files.
+
+
+
+
+## build application
+
+During build need to copy content of lsp_app to destination folder with web application.
